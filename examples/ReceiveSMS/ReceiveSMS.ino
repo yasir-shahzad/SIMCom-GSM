@@ -15,7 +15,7 @@ SIMCOM modem(TxPin,RxPin);
         //  Get sms:
         char pos;  
         char phone_num[20]; // array for the phone number string
-        char sms_text[50];
+        char sms_text[196];
 
         bool gsm_started=false;
 
@@ -49,6 +49,12 @@ void setup() {
 }
 void loop(){
 
+  if( modem.IsSMSPresent(phone_num, sms_text, 196)){
+     Serial.print("Phone num: ");
+     Serial.println(phone_num);
+     Serial.print("Sms text: ");
+     Serial.println(sms_text);
+  }
 
  
 }
