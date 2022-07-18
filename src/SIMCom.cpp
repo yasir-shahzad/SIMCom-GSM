@@ -14,113 +14,87 @@ Arduino 1.6.5+
 SIMCOM GSM Evaluation Board - SIM800L, SIM800C, SIM900, SIM808
 ******************************************************************************/
 #include "Arduino.h"
-#include "SIMCOM.h"
-
+#include "SIMCom.h"
+#include <SoftwareSerial.h>
 #ifdef ESP8266
  #include <pgmspace.h>
 #endif
-/*
-  Value RSSI(receive signal strength indicator) dBm  Condition 
-  4signal: 1marginal, 2Ok, 3Good, 4Excellent
-        2 -109  Marginal
-        3 -107  Marginal
-        4 -105  Marginal
-        5 -103  Marginal
-        6 -101  Marginal
-        7 -99 Marginal
-        8 -97 Marginal
-        9 -95 Marginal
-        10  -93 OK
-        11  -91 OK
-        12  -89 OK
-        13  -87 OK
-        14  -85 OK
-        15  -83 Good
-        16  -81 Good
-        17  -79 Good
-        18  -77 Good
-        19  -75 Good
-        20  -73 Excellent
-        21  -71 Excellent
-        22  -69 Excellent
-        23  -67 Excellent
-        24  -65 Excellent
-        25  -63 Excellent
-        26  -61 Excellent
-        27  -59 Excellent
-        28  -57 Excellent
-        29  -55 Excellent
-        30  -53 Excellent
-*/
+
 int sqTable[] = {-115, -111, -109, -107, -105, -103, -101, -99, -97, -95, -93, -91, -89, -87, -85, -83, -81, -79, -77, -75, -73, -71, -69, -67, -65, -63, -61, -59, -57, -55, -53};
 
-SIMCOM::SIMCOM(LCD1202* lcd_handler){
-   this->lcd_handler = lcd_handler;
-
+SIMCOM::SIMCOM(int transmitPin, int receivePin) {
+#ifdef ESP8266
+    GSMserial = new SoftwareSerial(receivePin, transmitPin, false, 1024);
+#else
+    GSMserial = new SoftwareSerial(receivePin, transmitPin, false);
+#endif
 }
 
+SIMCOM::~SIMCOM() {
+    delete GSMserial; // delete it to avoide any memory leak
+}
 
-
-int SIMCOM::begin(long baud_rate, uint8_t TryCont){
- //   lcd_handler->battery(78,0,90,0);
-//    lcd_handler->Update ();
-    int cont=0;
+ 
+int SIMCOM::begin(long baud_rate){
+	int response=-1;
+	int cont=0;
 	boolean norep=false;
 	boolean turnedON=false;
 	SetCommLineStatus(CLS_ATCMD);  
-    Serial2.begin(baud_rate, SERIAL_8N1, RXD2, TXD2);
-    pinMode(RESET_PIN, OUTPUT);
-    digitalWrite(RESET_PIN, LOW);
-  
-	for (cont=0; cont<TryCont; cont++)   // trying for GSM print
+	GSMserial->begin(baud_rate);	
+    GSMserial->flush();
+	for (cont=0; cont<3; cont++)
     {
-        Serial.print("\nTRY:");
+        Serial.print(F("Try:"));
         Serial.println(cont);
 		if (!turnedON)
-        { 
-            if(cont > 0)delay(100);
-            int resp = SendATCmdWaitResp("AT", 300, 100, "OK", 2);
-
+        {
+            int resp = SendATCmdWaitResp("AT", 500, 100, "OK", 3);
             if( resp == AT_RESP_OK ){
-                norep=false;
+				Serial.print("recieved Ok");
                 break;
 			}
-           else if( resp == AT_RESP_ERR_NO_RESP || resp == AT_RESP_ERR_DIF_RESP)
+            if( resp == AT_RESP_ERR_NO_RESP || resp == AT_RESP_ERR_DIF_RESP)
             {
-    			Serial.println(F("Resting GSM:Please wait..."));
-    			digitalWrite(RESET_PIN, HIGH);
-    			delay(2500);
-    			digitalWrite(RESET_PIN, LOW);
-    			delay(15000);
-    			norep=true;
+			// generate turn on pulse
+			Serial.print(F("Resting GSM:Please wait..."));
+			digitalWrite(RESET_PIN, HIGH);
+			delay(2500);
+			digitalWrite(RESET_PIN, LOW);
+			delay(15000);
+			norep=true;
             }
 			
 		}
+		else{
+			#ifdef DEBUG_ON
+			Serial.println(F("DB:ELSE"));
+			#endif
+			norep=false;
+		}
 	}
 	
-	if (AT_RESP_OK == SendATCmdWaitResp("AT", 500, 100, "OK", 2)){
+	if (AT_RESP_OK == SendATCmdWaitResp("AT", 500, 100, "OK", 3)){
 		turnedON=true;
-        norep=false;
     }
-    
-	if(cont== TryCont && norep){
+	
+	if(cont==2 && norep){
 		Serial.println(F("Error: initializing GSM failed"));
-        delay(200);
+		delay(700);
 		Serial.println(F("Please check the power and serial connections, thanks"));
-        SetCommLineStatus(CLS_FREE);
 		return 0;
 	}
 	
-	
+	SetCommLineStatus(CLS_FREE);
 
 	if(turnedON){   
 	    // put the initializing settings here
 		InitParam(PARAM_SET_0);
 		InitParam(PARAM_SET_1);//configure the module 
-		WaitResp(50, 50); 
-		Echo(0);               //enable AT echo
-		SetGSMState(READY);
-        SetCommLineStatus(CLS_FREE);
+		WaitResp(50, 50);
+	    Serial.println("Done"); 
+		Echo(0);                   //enable AT echo
+		setStatus(READY);
 		return(1);
 	}
 }
@@ -132,20 +106,23 @@ void SIMCOM::InitParam(byte group){
 	switch (group) {
 	case PARAM_SET_0:
 		SetCommLineStatus(CLS_ATCMD);		
-		SendATCmdWaitResp("AT&F", 1000, 50, "OK", 1);   // Reset to the factory settings    		
-		SendATCmdWaitResp("ATE0", 500, 50, "OK", 1);    // switch off echo
-		SendATCmdWaitResp("AT+CLTS=1", 1000, 50, "OK", 1);   // Enable auto network time sync
-		//SendATCmdWaitResp("AT&W", 1000, 50, "OK", 1);   // Save the setting to permanent memory so that module enables sync on restart also	
+		SendATCmdWaitResp("AT&F", 1000, 50, "OK", 5);   // Reset to the factory settings    		
+		SendATCmdWaitResp("ATE0", 500, 50, "OK", 5);    // switch off echo
+		SendATCmdWaitResp("AT+CLTS=1", 1000, 50, "OK", 5);   // Enable auto network time sync
+		SendATCmdWaitResp("AT&W", 1000, 50, "OK", 5);   // Save the setting to permanent memory so that module enables sync on restart also
+		
 		SetCommLineStatus(CLS_FREE);
 		break;
 
 	case PARAM_SET_1:
 		SetCommLineStatus(CLS_ATCMD);		
-		SendATCmdWaitResp(F("AT+CLIP=1"), 500, 50, "OK", 1);   // Request calling line identification		
-		SendATCmdWaitResp(F("AT+CMEE=1"), 500, 50, "OK", 1);   // Mobile Equipment Error Code			
-		SendATCmdWaitResp(F("AT+CMGF=1"), 500, 50, "OK", 1);   // set the SMS mode to text 				
-		SendATCmdWaitResp(F("AT+CPBS=\"SM\""), 1000, 50, "OK", 1); // select phonebook memory storage
-		SendATCmdWaitResp(F("AT+CIPSHUT"), 500, 50, "SHUT OK", 1);
+		SendATCmdWaitResp(F("AT+CLIP=1"), 500, 50, "OK", 5);   // Request calling line identification		
+		SendATCmdWaitResp(F("AT+CMEE=0"), 500, 50, "OK", 5);   // Mobile Equipment Error Code			
+		SendATCmdWaitResp(F("AT+CMGF=1"), 500, 50, "OK", 5);   // set the SMS mode to text 		
+		SetCommLineStatus(CLS_FREE);  						   // checks comm line if it is free		
+		InitSMSMemory();                                       // init SMS storage		
+		SendATCmdWaitResp(F("AT+CPBS=\"SM\""), 1000, 50, "OK", 5);  // select phonebook memory storage
+		SendATCmdWaitResp(F("AT+CIPSHUT"), 500, 50, "SHUT OK", 5);
 		SetCommLineStatus(CLS_FREE);
 		break;
 	}
@@ -159,8 +136,8 @@ char SIMCOM::InitSMSMemory(void)
   if (CLS_FREE != GetCommLineStatus()) return (ret_val);
   SetCommLineStatus(CLS_ATCMD);
   ret_val = 0; // not initialized yet
- // SendATCmdWaitResp("AT+CNMI=1,2,0,0,0", 1000, 50, "OK", 2); // Disable messages about new SMS from the GSM module 
-  if (AT_RESP_OK == SendATCmdWaitResp("AT+CPMS=\"SM\",\"SM\",\"SM\"", 1000, 10, "+CPMS:", 1)) {
+  SendATCmdWaitResp("AT+CNMI=1,2,0,0,0", 1000, 50, "OK", 2); // Disable messages about new SMS from the GSM module 
+  if (AT_RESP_OK == SendATCmdWaitResp("AT+CPMS=\"SM\",\"SM\",\"SM\"", 1000, 1000, "+CPMS:", 10)) {
        ret_val = 1;
   }
   else ret_val = 0;
@@ -177,17 +154,18 @@ return:
       AT_RESP_ERR_DIF_RESP = 0,   // response_string is different from the response
       AT_RESP_OK = 1,             // response_string was included in the response
 **********************************************************/
-int SIMCOM::SendATCmdWaitResp(char const *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *response_string, byte no_of_attempts)
+char SIMCOM::SendATCmdWaitResp(char const *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *response_string, byte no_of_attempts)
 {
   byte status;
-  int ret_val = AT_RESP_ERR_NO_RESP;
+  char ret_val = AT_RESP_ERR_NO_RESP;
   byte i;
-  
-  for (i = 0; i < no_of_attempts; i++) {
 
+  for (i = 0; i < no_of_attempts; i++) {
+    
      if (i > 0) delay(300); 
-    Serial2.println(AT_cmd_string);
+    GSMserial->println(AT_cmd_string);
     status = WaitResp(start_comm_tmout, max_interchar_tmout); 
+	
     if (status == RX_FINISHED) {
       if(IsStringReceived(response_string)) {
         ret_val = AT_RESP_OK;      
@@ -212,16 +190,16 @@ return:
       AT_RESP_ERR_DIF_RESP = 0,   // response_string is different from the response
       AT_RESP_OK = 1,             // response_string was included in the response
 **********************************************************/
-int SIMCOM::SendATCmdWaitResp(const __FlashStringHelper *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout,char const *response_string, byte no_of_attempts)
+char SIMCOM::SendATCmdWaitResp(const __FlashStringHelper *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout,char const *response_string, byte no_of_attempts)
 {
   byte status;
-  int ret_val = AT_RESP_ERR_NO_RESP;
+  char ret_val = AT_RESP_ERR_NO_RESP;
   byte i;
 
   for (i = 0; i < no_of_attempts; i++) {
 	
     if (i > 0) delay(300); 
-    Serial2.println(AT_cmd_string);
+    GSMserial->println(AT_cmd_string);
     status = WaitResp(start_comm_tmout, max_interchar_tmout); 
     if (status == RX_FINISHED) {
       if(IsStringReceived(response_string)) {
@@ -231,7 +209,6 @@ int SIMCOM::SendATCmdWaitResp(const __FlashStringHelper *AT_cmd_string, uint16_t
       else ret_val = AT_RESP_ERR_DIF_RESP;
     }
     else {
-        
       ret_val = AT_RESP_ERR_NO_RESP;
     }    
   }
@@ -241,21 +218,20 @@ int SIMCOM::SendATCmdWaitResp(const __FlashStringHelper *AT_cmd_string, uint16_t
 
 
 
-int SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *expected_resp_string)
+byte SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *expected_resp_string)
 {
   byte status;
-  int ret_val;
+  byte ret_val;
 
   RxInit(start_comm_tmout, max_interchar_tmout); 
-//  long int strtim=millis();
+ // long int strtim=millis();
   do {    
         status = IsRxFinished();
 		#ifdef ESP8266
 			yield();
 		#endif
      } while (status == RX_NOT_FINISHED);
- //       Serial.print("\nresp:");
- //  Serial.println((millis()-strtim));
+ // Serial.print((millis()-strtim));
   if (status == RX_FINISHED) {
     if(IsStringReceived(expected_resp_string)) {  
       ret_val = RX_FINISHED_STR_RECV;     
@@ -270,41 +246,11 @@ int SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout, ch
   return (ret_val);
 }
 
-
-/**********************************************************
-Method waits for the given time or till response
-
-compare_string - pointer to the string which should be find
-
-return: 0 - string was NOT received
-        1 - string was received
-**********************************************************/
-
-int SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
+byte SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
 {
-  int status;
+  byte status;
 
   RxInit(start_comm_tmout, max_interchar_tmout);  // starting initilizations
-  do {
-   
-    status = IsRxFinished();    
-  } while (status == RX_NOT_FINISHED);
-  return (status);
-}
-
-
-
-int SIMCOM::CheckResp( unsigned int max_interchar_tmout)
-{
-  int status;
-  comm_buf_len = 0;
-  rx_state = RX_NOT_STARTED;
-  interchar_tmout = max_interchar_tmout;
-  start_reception_tmout = 1;
-  prev_time = millis();
-  comm_buf[0] = 0x00; // end of string
-  p_comm_buf = &comm_buf[0];
-
   do {
     status = IsRxFinished();
   } while (status == RX_NOT_FINISHED);
@@ -312,26 +258,15 @@ int SIMCOM::CheckResp( unsigned int max_interchar_tmout)
 }
 
 
-/**********************************************************
-Method checks received bytes
-
-compare_string - pointer to the string which should be find
-
-return: 0 - string was NOT received
-        1 - string was received
-**********************************************************/
-
-int SIMCOM::IsRxFinished(void)
+byte SIMCOM::IsRxFinished(void)
 {
   byte num_of_bytes;
-  int ret_val = RX_NOT_FINISHED;  // default not finished
+  byte ret_val = RX_NOT_FINISHED;  // default not finished
 
   if (rx_state == RX_NOT_STARTED) {
-
-    if (!Serial2.available()) {
-
+    if (!GSMserial->available()) {
       if ((unsigned long)(millis() - prev_time) >= start_reception_tmout) {
-        comm_buf[comm_buf_len] = '\0';
+        comm_buf[comm_buf_len] = 0x00;
         ret_val = RX_TMOUT_ERR;
       }  
     }
@@ -342,24 +277,23 @@ int SIMCOM::IsRxFinished(void)
   }
 
   if (rx_state == RX_ALREADY_STARTED) {
-    num_of_bytes = Serial2.available();
-  
+    num_of_bytes = GSMserial->available();
     if (num_of_bytes) prev_time = millis();
     
     while (num_of_bytes) { 
       num_of_bytes--;
       if (comm_buf_len < COMM_BUF_LEN) {
-        *p_comm_buf = Serial2.read();
+        *p_comm_buf = GSMserial->read();
         p_comm_buf++;
         comm_buf_len++;
-        comm_buf[comm_buf_len] = '\0';   // and finish currently received characters                              
+        comm_buf[comm_buf_len] = 0x00;   // and finish currently received characters                              
       }
       else {
-        Serial2.read();
+        GSMserial->read();
       }
     }
     if ((unsigned long)(millis() - prev_time) >= interchar_tmout) {
-      comm_buf[comm_buf_len] = '\0';  // for sure finish string again
+      comm_buf[comm_buf_len] = 0x00;  // for sure finish string again
 	  #ifdef Partial_Debugg
 	  Serial.print("Buffer Data:");
 	  Serial.println(comm_buf[comm_buf_len]);
@@ -389,10 +323,10 @@ compare_string - pointer to the string which should be find
 return: 0 - string was NOT received
         1 - string was received
 **********************************************************/
-int SIMCOM::IsStringReceived(char const *compare_string)
+byte SIMCOM::IsStringReceived(char const *compare_string)
 {
   char *ch;
-  int ret_val = 0;
+  byte ret_val = 0;
 
   if(comm_buf_len) {
 	#ifdef DEBUG_ON || Partial_Debugg
@@ -405,6 +339,9 @@ int SIMCOM::IsStringReceived(char const *compare_string)
     if (ch != NULL) {
       ret_val = 1;
     }
+	else
+	{
+	}
   }
 
   return (ret_val);
@@ -421,7 +358,7 @@ void SIMCOM::RxInit(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
   comm_buf[0] = 0x00; // end of string
   p_comm_buf = &comm_buf[0];
   comm_buf_len = 0;
-  Serial2.flush(); // erase rx circular buffer
+  GSMserial->flush(); // erase rx circular buffer
 }
 
 void SIMCOM::Echo(byte state)
@@ -430,14 +367,55 @@ void SIMCOM::Echo(byte state)
 	{
 	  SetCommLineStatus(CLS_ATCMD);
 
-	  Serial2.print("ATE");
-	  Serial2.print((int)state);    
-	  Serial2.print("\r");
+	  GSMserial->print("ATE");
+	  GSMserial->print((int)state);    
+	  GSMserial->print("\r");
 	  delay(500);
 	  SetCommLineStatus(CLS_FREE);   
 	}
 }
 
+
+/**********************************************************
+Method calls the specific number
+number_string: pointer to the phone number string
+               e.g. gsm.Call("+420123456789");
+**********************************************************/
+void SIMCOM::Call(char *number_string)
+{
+   //  if (CLS_FREE != gsm.GetCommLineStatus()) return;
+   ///  gsm.SetCommLineStatus(CLS_ATCMD);
+     // ATDxxxxxx;<CR>
+     GSMserial->print(F("ATD"));
+     GSMserial->print(number_string);
+     GSMserial->println(F(";"));
+     // 10 sec. for initial comm tmout
+     // 50 msec. for inter character timeout
+     WaitResp(10000, 50);
+   //  gsm.SetCommLineStatus(CLS_FREE);
+}
+
+/**********************************************************
+Method calls the number stored at the specified SIM position
+sim_position: position in the SIM <1...>
+              e.g. gsm.Call(1);
+**********************************************************/
+void SIMCOM::Call(int sim_position)
+{     
+     //char ret_val = -1;
+     //if (CLS_FREE != GetCommLineStatus()) return (ret_val);
+    // SetCommLineStatus(CLS_ATCMD);
+     // ATD>"SM" 1;<CR>
+     GSMserial->print(F("ATD>\"SM\" "));
+     GSMserial->print(sim_position);
+     GSMserial->println(F(";"));
+
+     // 10 sec. for initial comm tmout
+     // 50 msec. for inter character timeout
+     WaitResp(10000, 50);
+
+     //SetCommLineStatus(CLS_FREE);
+}
 
 
 
@@ -459,11 +437,7 @@ return:
         -----------
         0 - SMS was not sent
         1 - SMS was sent
-
-
-an example of usage:
-        GSM gsm;
-        Serial2.SendSMS("00XXXYYYYYYYYY", "SMS text");
+        
 **********************************************************/
 char SIMCOM::SendSMS(char *number_str, char *message_str) 
 {
@@ -477,20 +451,20 @@ char SIMCOM::SendSMS(char *number_str, char *message_str)
   SetCommLineStatus(CLS_ATCMD);
   ret_val = 0;
   
-    Serial2.print(F("AT+CMGF=1\r\n")); //set sms to text mode
+    GSMserial->print(F("AT+CMGF=1\r\n")); //set sms to text mode
 	Serial.println("AT+CMGF");
 	delay(50);
-    Serial2.flush();
-    Serial2.print(F("AT+CMGS=\""));  // command to send sms
-    Serial2.print(number_str);  
-    Serial2.println(F("\"\r"));
+    GSMserial->flush();
+    GSMserial->print(F("AT+CMGS=\""));  // command to send sms
+    GSMserial->print(number_str);  
+    GSMserial->println(F("\"\r"));
     Serial.println("AT+CMGS");
     if (RX_FINISHED_STR_RECV == WaitResp(2000, 300, ">")) {
 		Serial.println("DEBUG:>");
-      Serial2.print(message_str); 
-	  //Serial2.print((char)26);	  
-      Serial2.println(end);
-	  //Serial2.flush(); // erase rx circular buffer
+      GSMserial->print(message_str); 
+	  //GSMserial->print((char)26);	  
+      GSMserial->println(end);
+	  //GSMserial->flush(); // erase rx circular buffer
     //  if (RX_FINISHED_STR_RECV == WaitResp(5000, 100, "+CMGS")) {  
 	//   Serial.println("SMS Successfully Sent: Acknowledgement received");
     //  ret_val = 1;    // SMS was send correctly 
@@ -535,20 +509,6 @@ return:
         1..20 - position where SMS is stored 
                 (suitable for the function GetSMS())
 
-
-an example of use:
-        GSM gsm;
-        char position;  
-        char phone_number[20]; // array for the phone number string
-        char sms_text[100];
-
-        position = IsSMSPresent(SMS_UNREAD);
-        if (position) {
-          // read new SMS
-          GetSMS(position, phone_num, sms_text, 100);
-          // now we have phone number string in phone_num
-          // and SMS text in sms_text
-        }
 **********************************************************/
 char SIMCOM::IsSMSPresent(byte required_status) 
 {
@@ -562,13 +522,13 @@ char SIMCOM::IsSMSPresent(byte required_status)
 
   switch (required_status) {
     case SMS_UNREAD:
-      Serial2.println(F("AT+CMGL=\"REC UNREAD\",1\r\n"));
+      GSMserial->println(F("AT+CMGL=\"REC UNREAD\",1\r\n"));
       break;
     case SMS_READ:
-      Serial2.println(F("AT+CMGL=\"REC READ\""));
+      GSMserial->println(F("AT+CMGL=\"REC READ\""));
       break;
     case SMS_ALL:
-      Serial2.println(F("AT+CMGL=\"ALL\""));
+      GSMserial->println(F("AT+CMGL=\"ALL\""));
       break;
   }
 
@@ -632,24 +592,6 @@ return:
         GETSMS_READ_SMS     - already read SMS was found at the specified position
         GETSMS_OTHER_SMS    - other type of SMS was found 
 
-
-an example of usage:
-        GSM gsm;
-        char position;
-        char phone_num[20]; // array for the phone number string
-        char sms_text[100]; // array for the SMS text string
-
-        position = IsSMSPresent(SMS_UNREAD);
-        if (position) {
-          // there is new SMS => read it
-          GetSMS(position, phone_num, sms_text, 100);
-          #ifdef DEBUG_PRINT
-            Serial2.DebugPrint("DEBUG SMS phone number: ", 0);
-            Serial2.DebugPrint(phone_num, 0);
-            Serial2.DebugPrint("\r\n          SMS text: ", 0);
-            Serial2.DebugPrint(sms_text, 1);
-          #endif
-        }        
 **********************************************************/
 char SIMCOM::GetSMS(byte position, char *phone_number, char *SMS_text, byte max_SMS_len) 
 {
@@ -665,8 +607,8 @@ char SIMCOM::GetSMS(byte position, char *phone_number, char *SMS_text, byte max_
   ret_val = GETSMS_NO_SMS; // still no SMS
   
   //send "AT+CMGR=X" - where X = position
-  Serial2.print(F("AT+CMGR="));
-  Serial2.println((int)position);  
+  GSMserial->print(F("AT+CMGR="));
+  GSMserial->println((int)position);  
 
   switch (WaitResp(5000, 100, "+CMGR")) {
     case RX_TMOUT_ERR:
@@ -781,8 +723,8 @@ char SIMCOM::DeleteSMS(byte position)
   ret_val = 0; // not deleted yet
   
   //send "AT+CMGD=XY" - where XY = position
-  Serial2.print(F("AT+CMGD="));
-  Serial2.println((int)position);  
+  GSMserial->print(F("AT+CMGD="));
+  GSMserial->println((int)position);  
 
 
   // 5000 msec. for initial comm tmout
@@ -833,7 +775,7 @@ bool SIMCOM::DeleteAll(){
   SetCommLineStatus(CLS_ATCMD);
   ret_val = 0; // not deleted yet
   
-  Serial2.print(F("AT+CMGDA=\"DELL ALL\"\n\r"));
+  GSMserial->print(F("AT+CMGDA=\"DELL ALL\"\n\r"));
     switch (WaitResp(2000, 50, "OK")) {
     case RX_TMOUT_ERR:
       // response was not received in specific time
@@ -881,20 +823,6 @@ return:
         1..20 - position where SMS is stored 
                 (suitable for the function GetSMS())
 
-
-an example of use:
-        GSM gsm;
-        char position;  
-        char phone_number[20]; // array for the phone number string
-        char sms_text[100];
-
-        position = IsSMSPresent(SMS_UNREAD);
-        if (position) {
-          // read new SMS
-          GetSMS(position, phone_num, sms_text, 100);
-          // now we have phone number string in phone_num
-          // and SMS text in sms_text
-        }
 **********************************************************/
 int SIMCOM::IsSMSPresent(char *phone_number, char *SMS_text, byte max_SMS_len) 
 {
@@ -904,18 +832,17 @@ int SIMCOM::IsSMSPresent(char *phone_number, char *SMS_text, byte max_SMS_len)
   char *p_char1;
   byte len;
   
-  
   if (CLS_FREE != GetCommLineStatus()) return (ret_val);
   SetCommLineStatus(CLS_ATCMD);
   ret_val = 0; // still not present
 	 
-   if(Serial2.available() > 0){
+   if(GSMserial->available() > 0){
         
         delay(20); 
-     // while  (Serial2.available() > 0)  Serial.write(Serial2.read());
+     // while  (GSMserial->available() > 0)  Serial.write(GSMserial->read());
 
 		
-        String Command=Serial2.readString();
+        String Command=GSMserial->readString();
 		//Serial.println("Ready to print command");
 		//Serial.println(Command);
 		
@@ -931,8 +858,8 @@ int SIMCOM::IsSMSPresent(char *phone_number, char *SMS_text, byte max_SMS_len)
 	//Serial.println("Printing Char");
 	//Serial.print(char_array);
 		
-		while(Serial2.available() > 0)  // Clearing all the data
-                Serial2.read();
+		while(GSMserial->available() > 0)  // Clearing all the data
+                GSMserial->read();
 	 
       if(strstr((char *)char_array, "+CMT:") != NULL){
 	     phone_number[0] = 0;
@@ -1007,15 +934,15 @@ char SIMCOM::GetTIME(char *current_Year, char *current_Month, char *current_Day,
   if (CLS_FREE != GetCommLineStatus()) return (ret_val);
   SetCommLineStatus(CLS_ATCMD);
   ret_val = 0; // still not present
-	 Serial2.print(F("AT+CCLK?\r\n")); //set sms to text mode
+	 GSMserial->print(F("AT+CCLK?\r\n")); //set sms to text mode
 	 delay(400); 
-   if(Serial2.available() > 0){
+   if(GSMserial->available() > 0){
         
         delay(20); 
-     // while  (Serial2.available() > 0)  Serial.write(Serial2.read());
+     // while  (GSMserial->available() > 0)  Serial.write(GSMserial->read());
 
 		
-        String Command=Serial2.readString();
+        String Command=GSMserial->readString();
 		//Serial.println("Ready to print command");
 		//Serial.println(Command);
 		
@@ -1031,8 +958,8 @@ char SIMCOM::GetTIME(char *current_Year, char *current_Month, char *current_Day,
 	//Serial.println("Printing Char");
 	//Serial.print(char_array);
 		
-		while(Serial2.available() > 0)  // Clearing all the data
-                Serial2.read();
+		while(GSMserial->available() > 0)  // Clearing all the data
+                GSMserial->read();
 	 
       if(strstr((char *)char_array, "+CCLK:") != NULL){
 	     current_Year[0] = 0;
@@ -1056,7 +983,7 @@ char SIMCOM::GetTIME(char *current_Year, char *current_Month, char *current_Day,
         *p_char = 0; // end of string      
         strcpy(current_Month, (char *)(p_char1));
         p_char1 = p_char+1;
-       // printf("String current_Month |%s|\n", current_Month);
+        printf("String current_Month |%s|\n", current_Month);
       }
       
       
@@ -1099,510 +1026,65 @@ char SIMCOM::GetTIME(char *current_Year, char *current_Month, char *current_Day,
   return (ret_val);
 }
 
-int SIMCOM::GetTIME(uint8_t& _year, uint8_t& _month, uint8_t& _day_of_month, uint8_t& _hour, uint8_t& _minute, uint8_t& _second){
 
-    int ret_val = -1;
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-    SetCommLineStatus(CLS_ATCMD);
-    ret_val = 0;
-    Serial2.println(F("AT+CCLK?")); 
-    delay(2000); 
-    if(Serial2.available() > 0){
-        String GSM_DATETIME = Serial2.readString();
-        Serial.print("GMS TIME:"); Serial.println(GSM_DATETIME);
-        while(Serial2.available() > 0)
-            Serial2.read();
-        if(GSM_DATETIME.indexOf("+CCLK:") != -1){
-            GSM_DATETIME.replace("+CCLK:", "");
-            GSM_DATETIME.replace("OK", "");
-            GSM_DATETIME.replace("\"", "");
-            GSM_DATETIME.trim();
-            Serial.print("GMS TIME:"); Serial.println(GSM_DATETIME);
-            sscanf(GSM_DATETIME.c_str(), "%d/%d/%d,%d:%d:%d", &_year, &_month, &_day_of_month, &_hour, &_minute, &_second);
-            ret_val = 1;    
-        }
-    } 
-    SetCommLineStatus(CLS_FREE);
-    return (ret_val);
-}
-int SIMCOM::GetNetworkTime(uint32_t& EPOC){
-    uint8_t PACKET[48];
-    memset(PACKET, 0, 48);
-    int ret_val = -1;
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-    SetCommLineStatus(CLS_ATCMD);
-    ret_val = 0;
-    if(SendATCmdWaitResp("AT+CIPSTART=\"UDP\", \"3.pk.pool.ntp.org\", \"123\"" , 1000, 20, "OK", 1) == AT_RESP_OK){
-        Serial.println("UDP STARTED");
-        if(WaitResp (15000, 50, "CONNECT OK") == RX_FINISHED_STR_RECV){
-            Serial.println("UDP CONNECT OK");
-            // IniTialize values needed To form NTP requesT
-            PACKET[0] = 0b11100011;   // LI, Version, Mode
-            PACKET[1] = 0;     // STraTum, or Type of clock
-            PACKET[2] = 6;     // Polling InTerval
-            PACKET[3] = 0xEC;  // Peer Clock Precision
-            PACKET[12]  = 49;
-            PACKET[13]  = 0x4E;
-            PACKET[14]  = 49;
-            PACKET[15]  = 52;
-             
-           Serial2.print(F("AT+CIPSEND\r\n"));  // command to send sms
-            int resp = WaitResp(1000, 50, ">");
-            if (resp == RX_FINISHED_STR_RECV ){
-                delay(1);
-                Serial.print("SENT "); Serial.println(Serial2.write(PACKET, 48));
-                Serial2.write(0x1A);
-            } 
-            if(WaitResp (5000, 50, "SEND OK") == RX_FINISHED_STR_RECV){
-                  unsigned long START_UDP_WAIT = millis();
-                  delay(10);
-                 
-                  while(millis() - START_UDP_WAIT < 1000){
-                      delay(100);
-                      if(Serial2.read(PACKET, 48) == 48){
-                          uint32_t SECONDS_SINCE_1900 = ( word(PACKET[40], PACKET[41]) << 16 | word(PACKET[42], PACKET[43]) ) + 18000;
-                          EPOC = SECONDS_SINCE_1900 - 2208988800UL;
-                          Serial.println("RECEIVED UDP");
-                          ret_val = 1;
-                          break;
-                          
-                      }
-                  }
-            } 
-            SendATCmdWaitResp("AT+CIPSHUT\r\n", 1000, 6, "SHUT OK", 1);
-            Serial2.readString();
-        }      
-                
-    }
-    SetCommLineStatus(CLS_FREE);
-    return (ret_val);
-  
-}
 
-char SIMCOM:: signalStrength(){
-    char ret_val = 0;
-    int i;
-    char *p_char; 
-    char *p_char1;
-    byte len;
-    
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-      SetCommLineStatus(CLS_ATCMD);
 
-     Serial2.print(F("AT+CSQ\r\n")); 
+/*
 
-     int resp =  WaitResp(700, 100, "+CSQ");
-     if (resp == RX_FINISHED_STR_RECV) {
-        p_char = strchr((char *)comm_buf,':');
-        
-        if (p_char != NULL) {
-          ret_val = atoi(p_char+1);
-          ret_val   = map(ret_val, 2, 30, 0, 100);
-          ret_val   =   constrain(ret_val , 0, 100);
-        }
-      
-      else {
-        ret_val = -1;
+
+
+void get_sms(char *phone_number, char *SMS_text, byte max_SMS_len) 
+{
+      char ret_val = -1;
+      char *p_char; 
+      char *p_char1;
+      byte len;
+
+      phone_number[0] = 0;  // end of string for now
+
+        // extract phone number string
+      // ---------------------------
+      p_char = strchr((char *)(GSMserial->_receive_buffer),':');
+      p_char1 = p_char+3; // we are on the first phone number character
+      p_char = strchr((char *)(p_char1),'"');
+      if (p_char != NULL) {
+        *p_char = 0; // end of string
+        strcpy(phone_number, (char *)(p_char1));
       }
-    }
 
+      // get SMS text and copy this text to the SMS_text buffer
+      // ------------------------------------------------------
+      p_char = strchr(p_char+1, 0x0a);  // find <LF>
+      if (p_char != NULL) {
+        // next character after <LF> is the first SMS character
+        p_char++; // now we are on the first SMS character 
 
-    SetCommLineStatus(CLS_FREE);
-    return (ret_val);
-
-
-}
-
-
-
-int SIMCOM:: attachGPRS(char* APN, char* USER, char* PWD){
-    int ret_val = 0;
-    byte status;
-    byte count = 0;
-    
-    char domian_buffer[100];
-    sprintf(domian_buffer, "AT+CSTT=\"%s\",\"%s\",\"%s\"\r\n", APN, USER, PWD);
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-      SetCommLineStatus(CLS_ATCMD);
-   
-       SendATCmdWaitResp("AT+CIPCLOSE\r\n", 1000, 6, "OK", 2); 
-       SendATCmdWaitResp("AT+CIPSHUT\r\n", 1000, 6, "SHUT OK", 2); 
-       SendATCmdWaitResp(domian_buffer, 300, 4, "OK", 2);  //  status =  SendATCmdWaitResp("AT+CSTT=\"connect.mobilinkworld.com\",\"\",\"\"\r\n", 300, 10, "OK", 2);
-    
-     
-       delay(500);
-       status = SendATCmdWaitResp("AT+CIICR\r\n", 10000, 6, "OK", 2); 
- 
-        if (AT_RESP_OK == status){
-
-           delay(1000);     
-           Serial2.print("AT+CIFSR\r\n");
-           status =  WaitResp (500, 10);
-
-           #ifdef ResponseDebug
-           Serial.print("LOCAL IP:");
-           Serial.println((char*)comm_buf); 
-           #endif
-      
-         if (status == RX_FINISHED) {
-            for(int i= 0; i < comm_buf_len; i++){
-                if(comm_buf[i] == 0x2E)
-                    count++;
-             }
-                               
-             if(count == 3 ){
-                 ret_val = 1;
-                 SetGSMState (ATTACHED);
-                }
-             else
-                 ret_val = 0;
-           }
-
+        // find <CR> as the end of SMS string
+        p_char1 = strchr((char *)(p_char), 0x0d);  
+        if (p_char1 != NULL) {
+          // finish the SMS text string 
+          // because string must be finished for right behaviour 
+          // of next strcpy() function
+          *p_char1 = 0; 
         }
-     SetCommLineStatus(CLS_FREE);
-     return (ret_val);
-}
+        // in case there is not finish sequence <CR><LF> because the SMS is
+        len = strlen(p_char);
 
-
-int SIMCOM:: ConnectTCP(const char* server_ip, const char* server_port){
-    char com_buffer[100];
-    int ret_val = -1;
-    byte status;
-
-    
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-      SetCommLineStatus(CLS_ATCMD);
-      sprintf(com_buffer, "AT+CIPSTART =\"TCP\",\"%s\", \"%s\"\r\n", server_ip, server_port);
-
-      status = SendATCmdWaitResp(com_buffer, 1000, 20, "OK", 1);  //SendATCmdWaitResp("AT+CIPSTART =\"TCP\", \"210.56.21.194\", \"1883\"\r\n", 2000, 10, "OK", 1);
-
-      if(status == AT_RESP_OK){
-        if(!IsStringReceived("CONNECT OK")){
-         status =  WaitResp (15000, 50, "CONNECT OK");
-         if(status == RX_FINISHED_STR_RECV){
-            ret_val = 1;
-            SetGSMState (TCPCONNECTED);
-           }
-         else 
-            ret_val = 0;
-         }
+        if (len < max_SMS_len) {
+          // buffer SMS_text has enough place for copying all SMS text
+          // so copy whole SMS text
+          // from the beginning of the text(=p_char position) 
+          // to the end of the string(= p_char1 position)
+          strcpy(SMS_text, (char *)(p_char));
+        }
         else {
-            SetGSMState (TCPCONNECTED);
-            ret_val = 1;
-         }
-      }
-     // if(ret_val == 1 ) Serial.println("TCP IS connected");
-     SetCommLineStatus(CLS_FREE);
-     return (ret_val);
- }
-
-
-
-int SIMCOM:: connectionStatus(){   
-    int ret_val = -1;
-    byte status;
-   
-
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-      SetCommLineStatus(CLS_ATCMD);
-      
-      Serial2.print("AT+CIPSTATUS\r\n");
-      status = WaitResp (500, 100);
-    if(status == RX_FINISHED){                    //    Serial.print("CIPSTATUS:>"); Serial.println((char*)comm_buf); 
-                        
-        if(IsStringReceived ("CONNECT OK"))
-            ret_val = TCP_CONNECTED;
-       else if(IsStringReceived ("IP STATUS"))
-            ret_val = GPRS_CONNECTED;
-       else if(IsStringReceived ("TCP CLOSED"))
-            ret_val = TCP_CLOSED;
-       else if(IsStringReceived ("PDP DEACT"))
-            ret_val = GPRS_DISCONNECTED;
-       else if(IsStringReceived ("IP GPRSACT"))
-            ret_val = IP_GPRSACT;
-       else if(IsStringReceived ("TCP CONNECTING"))
-            ret_val = TCP_WAIT;
-       else if(IsStringReceived ("IP INITIAL"))
-            ret_val = IP_INITIAL;
-       else if(IsStringReceived ("IP CONFIG"))
-            ret_val = IP_CONFIG;
-       else if(IsStringReceived ("IP START"))
-            ret_val = IP_START;
-       else if(IsStringReceived ("TCP CLOSING"))
-            ret_val = TCP_CLOSING;
-       else
-            ret_val = UNKNOWN_RESP;
-                        
-      }
-    else if (status == RX_TMOUT_ERR){          
-                ret_val = NO_RESP;
-    }
-    else {
-        //can restart gsm here if not responding
-        ret_val = -2; // there is no response
-     }
-     SetCommLineStatus(CLS_FREE);
-     return (ret_val);
-}
-
-bool  SIMCOM::connectMQTT(const char* client_id, const char* username, const char* password){
-         bool ret_val = false;
-         byte status;
-         
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-       SetCommLineStatus(CLS_ATCMD);
-
-       Serial2.print(F("AT+CIPSEND\r\n"));  // command to send sms
-
-       int resp = WaitResp(1000, 50, ">");
-
-    if (resp == RX_FINISHED_STR_RECV ) {
-          delay(1);
-          Serial2.write(0x10);
-          MQTTProtocolNameLength = strlen(MQTTProtocolName);
-          MQTTClientIDLength = strlen(client_id);
-          MQTTUsernameLength = strlen(username);
-          MQTTPasswordLength = strlen(password);
-          
-          if( MQTTUsernameLength == 0 || MQTTPasswordLength == 0)
-            datalength = 2+ MQTTProtocolNameLength + 4 + 2+ MQTTClientIDLength;
-          else
-            datalength = 2+ MQTTProtocolNameLength + 4 + 2+ MQTTClientIDLength+2+MQTTUsernameLength+2+MQTTPasswordLength;
-            
-          unsigned int X = datalength;
-          RLengthEncode(X);
-
-          Serial2.write(MQTTProtocolNameLength >> 8);
-          Serial2.write(MQTTProtocolNameLength & 0xFF);
-          Serial2.print(MQTTProtocolName);
-          Serial2.write(MQTTLVL); // LVL
-          Serial2.write(MQTTFlags); // Flags
-          Serial2.write(MQTTKeepAlive >> 8);
-          Serial2.write(MQTTKeepAlive & 0xFF);
-          Serial2.write(MQTTClientIDLength >> 8);
-          Serial2.write(MQTTClientIDLength & 0xFF);
-          Serial2.print(client_id);
-          Serial2.write(0x1A); 
-       } 
-       status = WaitResp (10000, 50, "SEND OK");
-    
-     if(status == RX_FINISHED_STR_RECV){
-        SetGSMState (BROKERCONNECTED);
-       // Serial.println("MQTT Connected");
-        ret_val = true;
+          // buffer SMS_text doesn't have enough place for copying all SMS text
+          memcpy(SMS_text, (char *)(p_char), (max_SMS_len-1));
+          SMS_text[max_SMS_len] = 0; // finish string
         }
-     SetCommLineStatus(CLS_FREE);
-     return (ret_val);    
-
- }
-bool SIMCOM::publishMQTT(const char* topic, const char* payload){
-        bool ret_val = false;
-     
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-      SetCommLineStatus(CLS_ATCMD);
-
-    Serial2.print(F("AT+CIPSEND\r\n"));  // command to send sms
-    
-    int resp = WaitResp(1000, 50, ">");
-    
-    if (resp == RX_FINISHED_STR_RECV) {
-        topiclength = strlen(topic);
-        datalength = strlen(payload);
-        String data = String(topic) + String(payload);
-    
-        delay(1);
-        /* BAIG CHANGED*/
-        Serial2.write(0x30 | 1);
-    
-        unsigned int X = 2 + topiclength + datalength ;
-        RLengthEncode(X);
-
-        Serial2.write(topiclength >> 8);
-        Serial2.write(topiclength & 0xFF);
-        Serial2.print(data);
-        Serial2.write(0x1A);
-     }
-
-     if(RX_FINISHED_STR_RECV == WaitResp (10000, 50, "SEND OK"))
-        ret_val = true;
-
-     SetCommLineStatus(CLS_FREE);
-     return (ret_val);   
+      }  
 }
 
-bool SIMCOM::publishMQTT(const char* topic, const uint8_t* payload, size_t payload_length){
-        bool ret_val = false;
-     
-    if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-      SetCommLineStatus(CLS_ATCMD);
-
-    Serial2.print(F("AT+CIPSEND\r\n"));  // command to send sms
-    
-    int resp = WaitResp(1000, 50, ">");
-    
-    if (resp == RX_FINISHED_STR_RECV) {
-        topiclength = strlen(topic);
-        datalength = payload_length;
-        String data = String(topic);
-    
-        delay(5);
-        /* BAIG CHANGED*/
-        Serial2.write(0x30 | 1);
-    
-        unsigned int X = 2 + topiclength + datalength ;
-        RLengthEncode(X);
-
-        Serial2.write(topiclength >> 8);
-        Serial2.write(topiclength & 0xFF);
-        Serial2.print(data);
-        for(int i = 0; i < payload_length; i++)
-            Serial2.write(payload[i]);
-        Serial2.write(0x1A);
-     }
-
-     if(RX_FINISHED_STR_RECV == WaitResp (10000, 50, "SEND OK"))
-        ret_val = true;
-
-     SetCommLineStatus(CLS_FREE);
-     return (ret_val);   
-
-
-
-}
-
-
-
-bool SIMCOM::subscirbeMQTT(int packet_id, const char* topic, byte qos) {
-       bool ret_val = false; 
-       
-       if (CLS_FREE != GetCommLineStatus()) return (ret_val);
-         SetCommLineStatus(CLS_ATCMD);
-    
-         Serial2.print(F("AT+CIPSEND\r\n"));  // command to send sms    
-    
-       if (RX_FINISHED_STR_RECV == WaitResp(1000, 50, ">")) {
-           topiclength =strlen(topic);
-           
-           delay(1);
-           Serial2.write(0x82);
-           
-           unsigned int X = 2 + 2 + topiclength + 1;
-           RLengthEncode(X);
-           
-           Serial2.write(packet_id >> 8);
-           Serial2.write(packet_id & 0xFF);
-           Serial2.write(topiclength >> 8);
-           Serial2.write(topiclength & 0xFF);
-           Serial2.print(topic);
-           Serial2.write(qos);
-           Serial2.write(0x1A);
-        }
-
-        if(RX_FINISHED_STR_RECV == WaitResp (10000, 50, "SEND OK")){
-           SetGSMState (MQTTSUBSCRIBED);
-         //  Serial.println("MQTT SUBSCRIBED");
-           ret_val = true;
-          }
-        SetCommLineStatus(CLS_FREE);
-        return (ret_val);
-
-  }
-inline void SIMCOM::RLengthEncode(int length){
-    unsigned int len = length;
-    uint8_t encoded_byte;
-    
-        do {
-               encoded_byte = len % 128;
-               len = len / 128;
-              if (len > 0) {
-                 encoded_byte |= 128;
-                }
-             Serial2.write(encoded_byte);
-        }
-        while (len > 0);
-
-}
-
-
-void SIMCOM::MQTTloop(void){
-         
-      if(Serial2.available() > 0){ 
-         int resp =  CheckResp (5); 
-
-        if(resp == RX_FINISHED){ 
-
-         #ifdef DebugResponse
-            for(int i =0; i < comm_buf_len; i++){ 
-            Serial.print(">");
-            Serial.print(i);
-            Serial.print(":");
-            Serial.write(comm_buf[i]);
-            }
-         #endif
-
-
-         if(IsStringReceived ("CLOSED")){
-           statusTime = millis();
-           Serial.println("TCP CLOSED");
-          }
-            
-        else   
-
-          if (comm_buf_len > 5){
-              uint8_t index = 0;
-              char topic[16];                //increase the size accordingly
-              uint8_t payload[128];          ////increase the size accordingly
-              uint16_t RL = 0;
-              uint16_t multiplier = 1;
-              uint8_t encodedByte; 
-                        
-            char type = comm_buf[index++];
-
-            if(type == 0x30){
-
-
-              do {
-                encodedByte = comm_buf[index++];                
-                uint32_t intermediate = encodedByte & 0x7F;
-                intermediate *= multiplier;
-                RL += intermediate;
-                multiplier *= 128;
-                if (multiplier > (128UL * 128UL * 128UL)) {
-                  Serial.print(F("Malformed packet len\n"));
-                 // return 0;
-                }
-              } while (encodedByte & 0x80);
-
-
-           uint16_t topic_len = ((comm_buf[index++] << 8) | comm_buf[index++]);
-
-
-                for(uint16_t i = 0; i < topic_len; i++){
-                   topic[i] = comm_buf[index + i];
-                 }
-                topic[topic_len] = 0x00;
-
-
-           uint16_t payload_length = RL - (topic_len+2);  
-
-
-
-                for(uint16_t i = 0; i < payload_length; i++){
-                  payload[i] = comm_buf[index+topic_len+i];
-
-                 }
-                payload[payload_length] = 0x00;
-
-          callback(topic,payload, payload_length);
-
-           
-       
-      }
-            }
-            }
-        }
-      
-}
 
 
 /*
@@ -1651,7 +1133,7 @@ void SIMCOM::signalQuality(){
 subclause 7.2.4
 99 Not known or not detectable 
 *
-  Serial2.print(F("AT+CSQ\r\n"));
+  GSMserial->print(F("AT+CSQ\r\n"));
   //Serial.println(_readSerial());
 }
 
@@ -1663,139 +1145,6 @@ void getSignalQuality(){
 
 
 */
-
-bool SIMCOM :: MQTTConnected(){
-
-  if(millis() > statusTime){
-      _retVal = 0;
-   int respVal =  connectionStatus ();
-   int gsmSTATE = GetGSMState ();
-   
-    if(LCDGSM[LCD_GSM_CON_STATUS] != respVal) LCDGSM[LCD_GSM_CON_STATUS] = respVal;
-   
-   /*
-      lcd_handler->fillTriangle(15,40,15,40, 45, 60,1  );
-      lcd_handler->print(15, 40, 1, "RESP:");
-      lcd_handler->print(45 , 40, 1, respVal);
-      lcd_handler->Update ();
-*/
-    //  #ifdef StatusDebug
-    //  Serial.print(">");
-    //  Serial.println(respVal);
-   //   #endif
-
-    switch(respVal)
-    {
-        case TCP_CONNECTED:
-            
-          switch(gsmSTATE){
-             case MQTTSUBSCRIBED:
-                 statusTime = millis()+20000;
-                 _retVal = 1;
-             break;
-             case BROKERCONNECTED:
-                  subscirbeMQTT (1, MQTT_TOPIC_SUB_REQ);
-                  subscirbeMQTT (1, MQTT_TOPIC_SUB_TIMER_REQ);
-                 
-             break;
-             case TCPCONNECTED:
-                 connectMQTT (MQTT_CONNECT_ID);
-                  defaultVal = 0;
-                
-              }
-        break;
-        case TCP_CLOSED: case GPRS_CONNECTED:  
-                       
-            //ConnectTCP ("210.56.21.194", "1883");
-            ConnectTCP(_Settings.getBrokerIP().c_str(), "1883");
-            
-        break;
-        case TCP_WAIT:  case TCP_CLOSING:
-            
-            statusTime = millis()+2000;  
-        break;
-        case IP_GPRSACT: case IP_INITIAL: case GPRS_DISCONNECTED:  
-        case IP_CONFIG: case IP_START:    
-           attachGPRS("connect.mobilinkworld.com");
-          
-        break;       
-        case NO_RESP:
-            
-            contVal +=1;
-            statusTime = millis()+2000;
-                 if(contVal == 4 && millis() > reset_time){
-                    Serial.println("in restart  GSM");
-                    contVal = 0;
-                    reset_time = millis()+600000;
-                    begin (115200, 2);
-                 }             
-        break;
-            
-        default:
-            defaultVal +=1;
-            if(defaultVal == 8)
-                attachGPRS("connect.mobilinkworld.com");
-            else           
-                statusTime = millis()+2000;
-        break;
-    }
-      
-  }
-
-  return _retVal;
-}
-
-void SIMCOM::setCallback(void (*callback)(char*, uint8_t*, size_t)){
-    this->callback = callback;
-
-}
-
-void SIMCOM::parse_packet(char* packet, uint16_t packet_len){
-
-    char topic[20];
-    uint8_t payload[100];
-
-                char type = packet[0];
-                if (type == '0' ) {
-                     uint16_t tl = (packet[2]<<8)+packet[3]; /* topic length in bytes */
-
-                        //= (char*) packet+llen+2;
-                        memset(topic, '0', 20);
-                        memset(payload, 0x00, 100);
-                        strncpy(topic, packet+4, tl);
-                        topic[tl] = '\0';
-                        size_t payload_length = packet_len - tl - 1 -1;
-                        memcpy(payload, packet+4+tl, payload_length);
-                        payload[payload_length] = '\0';
-                        
-             
-                        callback(topic,payload, payload_length);
-                        // msgId only present for QOS>0
-                        /*
-                        if ((this->buffer[0]&0x06) == MQTTQOS1) {
-                            msgId = (this->buffer[llen+3+tl]<<8)+this->buffer[llen+3+tl+1];
-                            payload = this->buffer+llen+3+tl+2;
-                            callback(topic,payload,len-llen-3-tl-2);
-
-                            this->buffer[0] = MQTTPUBACK;
-                            this->buffer[1] = 2;
-                            this->buffer[2] = (msgId >> 8);
-                            this->buffer[3] = (msgId & 0xFF);
-                            _client->write(this->buffer,4);
-                            lastOutActivity = t;
-
-                        } else { 
-                            payload = packet+llen+3+tl;
-                            Serial.println(topic);
-                            Serial.println(payload);
-                            Serial.println(packet_len-llen-3-tl);
-                           // callback(topic,payload,len-llen-3-tl);*/
-                    }
-
-
-}
-
-
 
 
 
