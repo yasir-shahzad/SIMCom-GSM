@@ -7,7 +7,7 @@ JAN 23, 2019
 
 
 This file defines the hardware interface(s) for all the SIMCcom
-and abstracts SMS AND CALL and other features of the SIMCOM GSM modules
+and abstracts SMS, GPRS AND CALL and other features of the SIMCOM GSM modules
 
 Development environment specifics:
 Arduino 1.6.5+
