@@ -1,20 +1,20 @@
 /******************************************************************************
 themastemrind.pk
-Source file for the GSM SIMCOM Library
+Source file for the GSM GSMCore Library
 
 Yasirshahzad918@gmail.com themastermind Electronics
 JAN 23, 2019
 
 
 This file defines the hardware interface(s) for all the SIMCcom
-and abstracts SMS AND CALL and other features of the SIMCOM GSM modules
+and abstracts SMS AND CALL and other features of the GSMCore GSM modules
 
 Development environment specifics:
 Arduino 1.6.5+
-SIMCOM GSM Evaluation Board - SIM800L, SIM800C, SIM900, SIM808
+GSMCore GSM Evaluation Board - SIM800L, SIM800C, SIM900, SIM808
 ******************************************************************************/
 #include "Arduino.h"
-#include "SIMCom.h"
+#include "GSMCore.h"
 #include <SoftwareSerial.h>
 #ifdef ESP8266
  #include <pgmspace.h>
@@ -22,7 +22,7 @@ SIMCOM GSM Evaluation Board - SIM800L, SIM800C, SIM900, SIM808
 
 int sqTable[] = {-115, -111, -109, -107, -105, -103, -101, -99, -97, -95, -93, -91, -89, -87, -85, -83, -81, -79, -77, -75, -73, -71, -69, -67, -65, -63, -61, -59, -57, -55, -53};
 
-SIMCOM::SIMCOM(int transmitPin, int receivePin) {
+GSMCore::GSMCore(int transmitPin, int receivePin) {
 #ifdef ESP8266
     GSMserial = new SoftwareSerial(receivePin, transmitPin, false, 1024);
 #else
@@ -30,12 +30,12 @@ SIMCOM::SIMCOM(int transmitPin, int receivePin) {
 #endif
 }
 
-SIMCOM::~SIMCOM() {
+GSMCore::~GSMCore() {
     delete GSMserial; // delete it to avoide any memory leak
 }
 
  
-int SIMCOM::begin(long baud_rate){
+int GSMCore::begin(long baud_rate){
 	int response=-1;
 	int cont=0;
 	boolean norep=false;
@@ -101,7 +101,7 @@ int SIMCOM::begin(long baud_rate){
 
 
 
-void SIMCOM::InitParam(byte group){
+void GSMCore::InitParam(byte group){
   
 	switch (group) {
 	case PARAM_SET_0:
@@ -129,7 +129,7 @@ void SIMCOM::InitParam(byte group){
 }
 
 
-char SIMCOM::InitSMSMemory(void) 
+char GSMCore::InitSMSMemory(void) 
 {
   char ret_val = -1;
 
@@ -154,7 +154,7 @@ return:
       AT_RESP_ERR_DIF_RESP = 0,   // response_string is different from the response
       AT_RESP_OK = 1,             // response_string was included in the response
 **********************************************************/
-char SIMCOM::SendATCmdWaitResp(char const *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *response_string, byte no_of_attempts)
+char GSMCore::SendATCmdWaitResp(char const *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *response_string, byte no_of_attempts)
 {
   byte status;
   char ret_val = AT_RESP_ERR_NO_RESP;
@@ -190,7 +190,7 @@ return:
       AT_RESP_ERR_DIF_RESP = 0,   // response_string is different from the response
       AT_RESP_OK = 1,             // response_string was included in the response
 **********************************************************/
-char SIMCOM::SendATCmdWaitResp(const __FlashStringHelper *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout,char const *response_string, byte no_of_attempts)
+char GSMCore::SendATCmdWaitResp(const __FlashStringHelper *AT_cmd_string, uint16_t start_comm_tmout, uint16_t max_interchar_tmout,char const *response_string, byte no_of_attempts)
 {
   byte status;
   char ret_val = AT_RESP_ERR_NO_RESP;
@@ -218,7 +218,7 @@ char SIMCOM::SendATCmdWaitResp(const __FlashStringHelper *AT_cmd_string, uint16_
 
 
 
-byte SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *expected_resp_string)
+byte GSMCore::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout, char const *expected_resp_string)
 {
   byte status;
   byte ret_val;
@@ -246,7 +246,7 @@ byte SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout, c
   return (ret_val);
 }
 
-byte SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
+byte GSMCore::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
 {
   byte status;
 
@@ -258,7 +258,7 @@ byte SIMCOM::WaitResp(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
 }
 
 
-byte SIMCOM::IsRxFinished(void)
+byte GSMCore::IsRxFinished(void)
 {
   byte num_of_bytes;
   byte ret_val = RX_NOT_FINISHED;  // default not finished
@@ -323,7 +323,7 @@ compare_string - pointer to the string which should be find
 return: 0 - string was NOT received
         1 - string was received
 **********************************************************/
-byte SIMCOM::IsStringReceived(char const *compare_string)
+byte GSMCore::IsStringReceived(char const *compare_string)
 {
   char *ch;
   byte ret_val = 0;
@@ -349,7 +349,7 @@ byte SIMCOM::IsStringReceived(char const *compare_string)
 
 //http://www.smssolutions.net/tutorials/gsm/receivesmsat/
 
-void SIMCOM::RxInit(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
+void GSMCore::RxInit(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
 {
   rx_state = RX_NOT_STARTED;
   start_reception_tmout = start_comm_tmout;
@@ -361,7 +361,7 @@ void SIMCOM::RxInit(uint16_t start_comm_tmout, uint16_t max_interchar_tmout)
   GSMserial->flush(); // erase rx circular buffer
 }
 
-void SIMCOM::Echo(byte state)
+void GSMCore::Echo(byte state)
 {
 	if (state == 0 or state == 1)
 	{
@@ -381,7 +381,7 @@ Method calls the specific number
 number_string: pointer to the phone number string
                e.g. gsm.Call("+420123456789");
 **********************************************************/
-void SIMCOM::Call(char *number_string)
+void GSMCore::Call(char *number_string)
 {
    //  if (CLS_FREE != gsm.GetCommLineStatus()) return;
    ///  gsm.SetCommLineStatus(CLS_ATCMD);
@@ -400,7 +400,7 @@ Method calls the number stored at the specified SIM position
 sim_position: position in the SIM <1...>
               e.g. gsm.Call(1);
 **********************************************************/
-void SIMCOM::Call(int sim_position)
+void GSMCore::Call(int sim_position)
 {     
      //char ret_val = -1;
      //if (CLS_FREE != GetCommLineStatus()) return (ret_val);
@@ -439,7 +439,7 @@ return:
         1 - SMS was sent
         
 **********************************************************/
-char SIMCOM::SendSMS(char *number_str, char *message_str) 
+char GSMCore::SendSMS(char *number_str, char *message_str) 
 {
   char ret_val = -1;
   byte i;
@@ -510,7 +510,7 @@ return:
                 (suitable for the function GetSMS())
 
 **********************************************************/
-char SIMCOM::IsSMSPresent(byte required_status) 
+char GSMCore::IsSMSPresent(byte required_status) 
 {
   char ret_val = -1;
   char *p_char;
@@ -593,7 +593,7 @@ return:
         GETSMS_OTHER_SMS    - other type of SMS was found 
 
 **********************************************************/
-char SIMCOM::GetSMS(byte position, char *phone_number, char *SMS_text, byte max_SMS_len) 
+char GSMCore::GetSMS(byte position, char *phone_number, char *SMS_text, byte max_SMS_len) 
 {
   char ret_val = -1;
   char *p_char; 
@@ -713,7 +713,7 @@ return:
         0 - SMS was not deleted
         1 - SMS was deleted
 **********************************************************/
-char SIMCOM::DeleteSMS(byte position) 
+char GSMCore::DeleteSMS(byte position) 
 {
   char ret_val = -1;
 
@@ -769,7 +769,7 @@ return:
 **********************************************************/
 
 
-bool SIMCOM::DeleteAll(){ 
+bool GSMCore::DeleteAll(){ 
   char ret_val = -1;
   if (CLS_FREE != GetCommLineStatus()) return (ret_val);
   SetCommLineStatus(CLS_ATCMD);
@@ -824,7 +824,7 @@ return:
                 (suitable for the function GetSMS())
 
 **********************************************************/
-int SIMCOM::IsSMSPresent(char *phone_number, char *SMS_text, byte max_SMS_len) 
+int GSMCore::IsSMSPresent(char *phone_number, char *SMS_text, byte max_SMS_len) 
 {
   int ret_val = -1;
   int i;
@@ -923,7 +923,7 @@ int SIMCOM::IsSMSPresent(char *phone_number, char *SMS_text, byte max_SMS_len)
 
 
 
-char SIMCOM::GetTIME(char *current_Year, char *current_Month, char *current_Day, char *current_Hour, char *current_Minute) 
+char GSMCore::GetTIME(char *current_Year, char *current_Month, char *current_Day, char *current_Hour, char *current_Minute) 
 {
   int ret_val = -1;
   int i;
@@ -1119,7 +1119,7 @@ void get_sms(char *phone_number, char *SMS_text, byte max_SMS_len)
         29  -55 Excellent
         30  -53 Excellent
 *
-void SIMCOM::signalQuality(){
+void GSMCore::signalQuality(){
 /*Response
 +CSQ: <rssi>,<ber>Parameters
 <rssi>
@@ -1139,7 +1139,7 @@ subclause 7.2.4
 
 void getSignalQuality(){
 
-  SIMCOM.signalQuality();
+  GSMCore.signalQuality();
   
 }
 

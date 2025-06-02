@@ -1,4 +1,4 @@
-#include <SIMCom.h>
+#include <GSMCore.h>
 
 
 #ifdef ESP8266
@@ -9,7 +9,7 @@
 #define TxPin 11
 #define RxPin 10
 // Instantiate the library with TxPin, RxPin.
-SIMCOM modem(TxPin,RxPin);
+GSMCore modem(TxPin,RxPin);
 
 
         //  Get sms:

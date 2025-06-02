@@ -1,17 +1,17 @@
 /******************************************************************************
 themastemrind.pk
-Source file for the GSM SIMCOM Library
+Source file for the GSM GSMCore Library
 
 Yasirshahzad918@gmail.com themastermind Electronics
 JAN 23, 2019
 +923106256643
 
 This file defines the hardware interface(s) for all the SIMCcom
-and abstracts SMS AND CALL and other features of the SIMCOM GSM modules
+and abstracts SMS AND CALL and other features of the GSMCore GSM modules
 
 Development environment specifics:
 Arduino 1.6.5+
-SIMCOM GSM Evaluation Board - SIM800L, SIM800C, SIM900, SIM808
+GSMCore GSM Evaluation Board - SIM800L, SIM800C, SIM900, SIM808
 ******************************************************************************/
 
 #ifndef SIMCOM_h
@@ -24,7 +24,7 @@ SIMCOM GSM Evaluation Board - SIM800L, SIM800C, SIM900, SIM808
 //#define DEBUG_ON
 
 	
-#define RESET_PIN 2   // pin to the reset pin SIMCOM GSM
+#define RESET_PIN 2   // pin to the reset pin GSMCore GSM
 
 #define COMM_BUF_LEN        120
 
@@ -84,7 +84,7 @@ enum getsms_ret_val_enum
   GETSMS_LAST_ITEM
 };
 
-class SIMCOM		
+class GSMCore		
 {									
   private:
 	int _status;
@@ -101,8 +101,8 @@ class SIMCOM
   //	char setRate(long baudRate);
   	
    public:
-     SIMCOM(int transmitPin, int receivePin);
-    ~SIMCOM();
+     GSMCore(int transmitPin, int receivePin);
+    ~GSMCore();
     bool sendSms(char* number,char* text);	 
     enum GSM_st_e { ERROR, IDLE, READY, ATTACHED, TCPSERVERWAIT, TCPCONNECTEDSERVER, TCPCONNECTEDCLIENT };
     byte comm_buf[COMM_BUF_LEN+1];  // communication buffer +1 for 0x00 termination
